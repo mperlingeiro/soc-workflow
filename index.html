@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrowdStrike SOC — Daily Shift Workflow</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f5f3;
+  --surface: #ffffff;
+  --surface2: #f0efeb;
+  --surface3: #e8e7e2;
+  --text: #1a1a1a;
+  --text2: #555550;
+  --text3: #888880;
+  --border: rgba(0,0,0,0.10);
+  --border2: rgba(0,0,0,0.18);
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --cs-red: #e8323a;
+  --cs-dark: #0f1923;
+  --info-bg: #e6f1fb; --info-border: #378add; --info-text: #0c447c;
+  --warn-bg: #faeeda; --warn-border: #ba7517; --warn-text: #633806;
+  --danger-bg: #fcebeb; --danger-border: #a32d2d; --danger-text: #501313;
+  --success-bg: #eaf3de; --success-border: #3b6d11; --success-text: #173404;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a18;
+    --surface: #242422;
+    --surface2: #2c2c2a;
+    --surface3: #343432;
+    --text: #e8e8e4;
+    --text2: #aaaaaa;
+    --text3: #666660;
+    --border: rgba(255,255,255,0.10);
+    --border2: rgba(255,255,255,0.18);
+    --info-bg: #042c53; --info-border: #378add; --info-text: #b5d4f4;
+    --warn-bg: #412402; --warn-border: #ef9f27; --warn-text: #fac775;
+    --danger-bg: #501313; --danger-border: #e24b4a; --danger-text: #f7c1c1;
+    --success-bg: #173404; --success-border: #639922; --success-text: #c0dd97;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px 16px 48px;
+}
+
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: var(--cs-dark);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+}
+.top-bar .brand { font-size: 13px; font-weight: 600; color: var(--cs-red); letter-spacing: 0.06em; }
+.top-bar .shift { font-size: 12px; color: #7a8a96; }
+.top-bar .clock { font-size: 13px; font-weight: 500; color: #c8d8e4; font-variant-numeric: tabular-nums; font-family: "SF Mono", Menlo, monospace; }
+
+.progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.progress-label { font-size: 12px; color: var(--text3); white-space: nowrap; }
+.progress-track {
+  flex: 1;
+  height: 4px;
+  background: var(--surface3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--cs-red);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.progress-pct { font-size: 12px; color: var(--text3); min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.phase-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.phase-tab {
+  padding: 6px 13px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 0.5px solid var(--border2);
+  background: var(--surface);
+  color: var(--text2);
+  transition: all 0.15s;
+  user-select: none;
+}
+.phase-tab:hover { background: var(--surface2); }
+.phase-tab.active { background: var(--cs-dark); color: var(--cs-red); border-color: var(--cs-red); }
+
+.phase-content { display: none; }
+.phase-content.active { display: block; }
+
+.phase-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px 18px;
+  background: var(--cs-dark);
+  border-radius: var(--radius-lg);
+}
+.phase-num { font-size: 30px; font-weight: 600; color: var(--cs-red); line-height: 1; min-width: 40px; }
+.phase-title { font-size: 15px; font-weight: 600; color: #c8d8e4; line-height: 1.3; }
+.phase-sub { font-size: 12px; color: #7a8a96; margin-top: 4px; }
+
+.steps-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+
+.step-item {
+  display: flex;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  align-items: flex-start;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.step-item:hover { border-color: var(--border2); }
+.step-item.done { background: var(--success-bg); border-color: var(--success-border); }
+
+.step-check {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border2);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  transition: all 0.15s;
+}
+.step-item.done .step-check { background: var(--success-bg); border-color: var(--success-border); }
+.step-check-mark { width: 10px; height: 10px; fill: none; stroke: var(--success-text); stroke-width: 2; display: none; }
+.step-item.done .step-check-mark { display: block; }
+
+.step-label { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.3; }
+.step-detail { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.55; }
+.step-item.done .step-label { color: var(--success-text); }
+
+.callout {
+  padding: 11px 15px;
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.65;
+  border-left: 3px solid transparent;
+}
+.callout strong { font-weight: 600; }
+.callout.tip { background: var(--info-bg); border-left-color: var(--info-border); color: var(--info-text); }
+.callout.warn { background: var(--warn-bg); border-left-color: var(--warn-border); color: var(--warn-text); }
+.callout.danger { background: var(--danger-bg); border-left-color: var(--danger-border); color: var(--danger-text); }
+.callout.success { background: var(--success-bg); border-left-color: var(--success-border); color: var(--success-text); }
+
+.severity-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.sev-card {
+  padding: 10px 6px;
+  border-radius: var(--radius-md);
+  text-align: center;
+  border: 0.5px solid var(--border);
+  background: var(--surface);
+}
+.sev-dot { width: 10px; height: 10px; border-radius: 50%; margin: 0 auto 6px; }
+.sev-label { font-size: 11px; font-weight: 600; color: var(--text); }
+.sev-desc { font-size: 10px; color: var(--text3); margin-top: 2px; line-height: 1.3; }
+.sev-critical .sev-dot { background: #e8323a; }
+.sev-high .sev-dot { background: #d4691a; }
+.sev-medium .sev-dot { background: #c49b1a; }
+.sev-low .sev-dot { background: #4a9e4a; }
+.sev-info .sev-dot { background: #5a7a9a; }
+
+.triage-question {
+  padding: 11px 14px;
+  background: var(--surface2);
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border);
+  margin-bottom: 8px;
+}
+.tq-label { font-size: 11px; font-weight: 600; color: var(--text3); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+.tq-options { display: flex; gap: 6px; flex-wrap: wrap; }
+.tq-btn {
+  padding: 5px 11px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  cursor: pointer;
+  border: 0.5px solid var(--border2);
+  background: var(--surface);
+  color: var(--text);
+  transition: all 0.15s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tq-btn:hover { background: var(--surface3); }
+.tq-btn.selected { background: var(--cs-dark); color: var(--cs-red); border-color: var(--cs-red); }
+
+.verdict-panel {
+  padding: 13px 15px;
+  background: var(--surface2);
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border);
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.65;
+  min-height: 52px;
+  margin-bottom: 14px;
+}
+.verdict-panel strong { color: var(--text); font-weight: 600; }
+
+.mitre-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-decoration: none;
+}
+.mitre-row:hover { border-color: var(--border2); background: var(--surface2); }
+.mitre-id { font-size: 12px; font-weight: 600; font-family: "SF Mono", Menlo, monospace; color: var(--cs-red); min-width: 74px; }
+.mitre-name { font-size: 12px; color: var(--text); flex: 1; }
+.mitre-tactic { font-size: 11px; color: var(--text3); }
+.mitre-arrow { font-size: 11px; color: var(--text3); }
+
+.nav-btns {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+  gap: 10px;
+}
+.nav-btn {
+  padding: 9px 18px;
+  font-size: 13px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 0.5px solid var(--border2);
+  background: var(--surface);
+  color: var(--text);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.nav-btn:hover { background: var(--surface2); }
+.nav-btn.primary { background: var(--cs-dark); color: var(--cs-red); border-color: var(--cs-red); }
+.nav-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+
+.done-banner {
+  text-align: center;
+  padding: 20px;
+  background: var(--success-bg);
+  border-radius: var(--radius-lg);
+  border: 0.5px solid var(--success-border);
+  color: var(--success-text);
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: 16px;
+  display: none;
+}
+.reset-btn {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 7px 16px;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 0.5px solid var(--success-border);
+  background: transparent;
+  color: var(--success-text);
+  font-family: inherit;
+}
+.reset-btn:hover { background: rgba(0,0,0,0.05); }
+
+footer {
+  margin-top: 32px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text3);
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="top-bar">
+  <span class="brand">CROWDSTRIKE FALCON</span>
+  <span class="shift">SOC Analyst — Daily Shift Guide</span>
+  <span class="clock" id="clock">--:--:-- UTC</span>
+</div>
+
+<div class="progress-bar-wrap">
+  <span class="progress-label">Shift progress</span>
+  <div class="progress-track"><div class="progress-fill" id="prog" style="width:0%"></div></div>
+  <span class="progress-pct" id="prog-pct">0%</span>
+</div>
+
+<div class="phase-tabs">
+  <div class="phase-tab active" onclick="setPhase(0)">1. Shift start</div>
+  <div class="phase-tab" onclick="setPhase(1)">2. Severity sort</div>
+  <div class="phase-tab" onclick="setPhase(2)">3. Open an alert</div>
+  <div class="phase-tab" onclick="setPhase(3)">4. Triage</div>
+  <div class="phase-tab" onclick="setPhase(4)">5. Respond</div>
+  <div class="phase-tab" onclick="setPhase(5)">6. Document</div>
+  <div class="phase-tab" onclick="setPhase(6)">MITRE ref</div>
+</div>
+
+<!-- PHASE 0 -->
+<div class="phase-content active" id="phase-0">
+  <div class="phase-header">
+    <div class="phase-num">01</div>
+    <div>
+      <div class="phase-title">Shift start — orientation</div>
+      <div class="phase-sub">Do this before touching a single alert. Takes ~5 min.</div>
+    </div>
+  </div>
+  <div class="steps-list">
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Log into Falcon portal</div><div class="step-detail">Go to falcon.crowdstrike.com → SSO (Microsoft Azure in CyberXcel). Check you're in the right Customer ID/tenant.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Go to Activity Dashboard first</div><div class="step-detail">Endpoint Security → Activity Dashboard (not Summary Dashboard). This gives the proper SOC view.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check Crowd Score</div><div class="step-detail">Top of dashboard. Scale 0–100. Higher = more risk. Note if it has changed since your last shift.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check Overwatch panel</div><div class="step-detail">Any "Hunting Leads" from Overwatch? These are expert-flagged alerts — treat as high priority even if severity looks low.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Note "Detection by Tactics" widget</div><div class="step-detail">Which MITRE tactics appeared today? Execution, Persistence, Lateral Movement? This tells you what type of attack is active.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Navigate to Endpoint Detections</div><div class="step-detail">Endpoint Security → Endpoint Detections. This is your main workbench for the shift.</div></div>
+    </div>
+  </div>
+  <div class="callout tip"><strong>Tip:</strong> Never jump straight into an individual alert. The Activity Dashboard gives you situational awareness — you need to know if there's an active incident before diving into individual alerts.</div>
+</div>
+
+<!-- PHASE 1 -->
+<div class="phase-content" id="phase-1">
+  <div class="phase-header">
+    <div class="phase-num">02</div>
+    <div>
+      <div class="phase-title">Sort all alerts — do NOT open randomly</div>
+      <div class="phase-sub">You work the queue top-down by severity. Always.</div>
+    </div>
+  </div>
+  <div class="severity-grid">
+    <div class="sev-card sev-critical"><div class="sev-dot"></div><div class="sev-label">Critical</div><div class="sev-desc">Start here — always</div></div>
+    <div class="sev-card sev-high"><div class="sev-dot"></div><div class="sev-label">High</div><div class="sev-desc">Next in queue</div></div>
+    <div class="sev-card sev-medium"><div class="sev-dot"></div><div class="sev-label">Medium</div><div class="sev-desc">After high done</div></div>
+    <div class="sev-card sev-low"><div class="sev-dot"></div><div class="sev-label">Low</div><div class="sev-desc">End of shift</div></div>
+    <div class="sev-card sev-info"><div class="sev-dot"></div><div class="sev-label">Info</div><div class="sev-desc">Reference only</div></div>
+  </div>
+  <div class="steps-list">
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Filter: Status = "New" only</div><div class="step-detail">You only want unworked alerts. In-Progress belongs to someone else. Closed is done.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Sort by Severity: Critical first</div><div class="step-detail">Click the Severity column header. Critical → High → Medium → Low → Informational. Never reverse this order.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Scan the list before opening anything</div><div class="step-detail">Same hostname appearing multiple times? Same technique? This is a pattern — could be an active breach in progress.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Assign first alert to yourself</div><div class="step-detail">Click Assign → select your username. Change status to "In Progress". Prevents two analysts working the same case.</div></div>
+    </div>
+  </div>
+  <div class="callout warn"><strong>Common mistake:</strong> Opening alerts in the order they appear (newest first). This means you may spend 20 minutes on a Low severity while a Critical sits untouched. Always sort by severity.</div>
+</div>
+
+<!-- PHASE 2 -->
+<div class="phase-content" id="phase-2">
+  <div class="phase-header">
+    <div class="phase-num">03</div>
+    <div>
+      <div class="phase-title">Read the alert — before you do anything else</div>
+      <div class="phase-sub">Click alert → "See Full Detection". Spend 2–3 min reading before acting.</div>
+    </div>
+  </div>
+  <div class="steps-list">
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Read: What device was hit?</div><div class="step-detail">Hostname and OS. Is this a SERVER (higher urgency, business impact) or a WORKSTATION (can isolate faster)?</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Read: What user was logged in?</div><div class="step-detail">Regular user, admin account, or service account? Admin = escalate immediately. Service account = likely lateral movement.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Read: Was it BLOCKED or just ALERTED?</div><div class="step-detail">Green shield icon = blocked (process didn't complete). No icon = alert only — process MAY have run successfully. Treat as urgent.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Read: What MITRE tactic and technique?</div><div class="step-detail">CrowdStrike shows this on the alert. Note the Tactic (e.g. Execution) and Technique ID (e.g. T1059). Look it up on attack.mitre.org if unfamiliar.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Look at the Process Tree</div><div class="step-detail">Work BACKWARDS from the alert. What was the parent process? Outlook → PowerShell? Word → cmd? Suspicious parent = likely malicious. Read every command line argument shown.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check for Threat Actor indicator</div><div class="step-detail">Small icon on alert = CrowdStrike has linked this to a known threat actor group (e.g. BEAR, SPIDER, PANDA naming). Note the group name.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check Network Connections tab</div><div class="step-detail">Any active outbound connections to external IPs? If yes — the process may be calling back to a C2 server. Note the IP. This is urgent.</div></div>
+    </div>
+  </div>
+  <div class="callout tip"><strong>Rule:</strong> Read first, act second. Many junior analysts start isolating or blocking before they understand what they're looking at. Read the full alert first — it takes 3 minutes and saves you from mistakes.</div>
+</div>
+
+<!-- PHASE 3 -->
+<div class="phase-content" id="phase-3">
+  <div class="phase-header">
+    <div class="phase-num">04</div>
+    <div>
+      <div class="phase-title">Triage — true positive or false positive?</div>
+      <div class="phase-sub">Use the decision helper below, then investigate accordingly.</div>
+    </div>
+  </div>
+
+  <div class="triage-question">
+    <div class="tq-label">Device type</div>
+    <div class="tq-options">
+      <div class="tq-btn" onclick="triageSelect(this,'device','workstation')">Workstation</div>
+      <div class="tq-btn" onclick="triageSelect(this,'device','server')">Server</div>
+      <div class="tq-btn" onclick="triageSelect(this,'device','unknown')">Unknown</div>
+    </div>
+  </div>
+  <div class="triage-question">
+    <div class="tq-label">Was action blocked?</div>
+    <div class="tq-options">
+      <div class="tq-btn" onclick="triageSelect(this,'blocked','yes')">Yes — green shield</div>
+      <div class="tq-btn" onclick="triageSelect(this,'blocked','no')">No — alert only</div>
+    </div>
+  </div>
+  <div class="triage-question">
+    <div class="tq-label">Parent process suspicious?</div>
+    <div class="tq-options">
+      <div class="tq-btn" onclick="triageSelect(this,'parent','yes')">Yes (Outlook→PS, Word→cmd)</div>
+      <div class="tq-btn" onclick="triageSelect(this,'parent','no')">No — looks normal</div>
+    </div>
+  </div>
+  <div class="triage-question">
+    <div class="tq-label">VirusTotal result on hash/IP?</div>
+    <div class="tq-options">
+      <div class="tq-btn" onclick="triageSelect(this,'vt','malicious')">Malicious detections</div>
+      <div class="tq-btn" onclick="triageSelect(this,'vt','clean')">Clean / unknown</div>
+      <div class="tq-btn" onclick="triageSelect(this,'vt','not-checked')">Haven't checked yet</div>
+    </div>
+  </div>
+
+  <div class="verdict-panel callout" id="verdict">Select options above to get a triage recommendation.</div>
+
+  <div class="steps-list">
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check VirusTotal for all hashes</div><div class="step-detail">Copy file hash from CrowdStrike → paste at virustotal.com. Do this for every suspicious file/hash. 0 detections = unknown; 5+ = almost certainly malicious.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check VirusTotal for suspicious IPs/domains</div><div class="step-detail">Any external IP or domain in Network Connections → check on VirusTotal. Also try AbuseIPDB for IP reputation.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Check Advanced Event Search for context</div><div class="step-detail">Investigate → Advanced Event Search. Search by hostname or username. Did this device/user trigger other alerts today? Context is everything.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Make your verdict: True or False Positive</div><div class="step-detail">True Positive = confirmed malicious activity. False Positive = legitimate behaviour incorrectly flagged. If unsure → escalate to senior analyst. Never guess.</div></div>
+    </div>
+  </div>
+  <div class="callout warn"><strong>Alert fatigue trap:</strong> If you see the same pattern 10 times and close them all quickly, you may miss the one that's real. The Medibank breach happened partly because real alerts were closed as false positives. Every alert deserves a real look.</div>
+</div>
+
+<!-- PHASE 4 -->
+<div class="phase-content" id="phase-4">
+  <div class="phase-header">
+    <div class="phase-num">05</div>
+    <div>
+      <div class="phase-title">Respond — true positive confirmed</div>
+      <div class="phase-sub">You've confirmed it's real. Now act fast and in order.</div>
+    </div>
+  </div>
+  <div class="steps-list">
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Contact the user (workstations only)</div><div class="step-detail">Call or message: "Don't touch your computer or reboot. Step away." Rebooting destroys volatile memory evidence.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Contain the host</div><div class="step-detail">Host Details tab → Contain Host. CrowdStrike cuts all network connections but keeps the RTR tunnel open so you can still investigate remotely.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Connect via RTR (Real-Time Response)</div><div class="step-detail">Click "Connect to Host". You now have a remote command line on the contained machine. Do NOT physically go to the device.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Capture memory dump immediately</div><div class="step-detail">Run: xmemdump complete — saves to C: drive. Do this FIRST — memory is volatile and lost on reboot. Most important forensic artefact.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Run ps — list running processes</div><div class="step-detail">Identify any suspicious processes still running. Note PIDs. Look for: unusual names, processes in temp folders, duplicate system process names.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Run netstat — check active connections</div><div class="step-detail">Look for ESTABLISHED connections to external IPs. Even after containment, identify what was connecting and to where.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Run CAPE to collect forensic artefacts</div><div class="step-detail">Upload CAPE script via RTR → run it. Collects: event logs, prefetch, registry hives, browser history, scheduled tasks. ~1 GB output.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Notify team lead</div><div class="step-detail">Brief your senior analyst: what device, what was found, what you've done, what you need. Don't wait until you have all answers — notify early.</div></div>
+    </div>
+  </div>
+  <div class="callout danger"><strong>Server rule:</strong> For production servers, always assess business impact with your team lead BEFORE containing. Containment may take down critical services. The decision may not be yours alone to make.</div>
+</div>
+
+<!-- PHASE 5 -->
+<div class="phase-content" id="phase-5">
+  <div class="phase-header">
+    <div class="phase-num">06</div>
+    <div>
+      <div class="phase-title">Document everything — every single time</div>
+      <div class="phase-sub">Even for false positives. Documentation is what separates good analysts from great ones.</div>
+    </div>
+  </div>
+  <div class="steps-list">
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Use UTC timestamps for everything</div><div class="step-detail">Hover CrowdStrike timestamps to see UTC. Write all times as: 2025-04-12 14:32:17 UTC. Never use local time in your report.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Record: host details</div><div class="step-detail">Hostname, OS, local IP, public IP, logged-in user, user's role/department.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Record: exact process chain</div><div class="step-detail">Copy the full command lines exactly as shown in CrowdStrike. Parent → child → grandchild. The exact syntax matters for legal records.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Record: MITRE tactic and technique</div><div class="step-detail">Write the full name and ID: e.g. "Execution — PowerShell (T1059.001)". This goes in the ticket and your report.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Record: all OSINT results</div><div class="step-detail">VirusTotal links and detection counts for every hash, IP, and domain you investigated. Screenshot and paste results.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Record: all actions taken</div><div class="step-detail">When you contained the host, connected via RTR, notified team lead, ran CAPE. Every action with exact UTC timestamps.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Write a narrative summary</div><div class="step-detail">3–5 sentences: how the attack started, what it tried to do, what happened (blocked? succeeded?), what you did about it.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Close the ticket correctly</div><div class="step-detail">Status → Closed. Tag: True Positive or False Positive. If false positive, add a note explaining why and whether an exclusion rule is needed.</div></div>
+    </div>
+  </div>
+  <div class="callout success"><strong>False positives:</strong> Still document them fully. If you close a false positive without notes, the next analyst investigates the same pattern again. Your notes save their time.</div>
+</div>
+
+<!-- PHASE 6 — MITRE -->
+<div class="phase-content" id="phase-6">
+  <div class="phase-header">
+    <div class="phase-num">&#9873;</div>
+    <div>
+      <div class="phase-title">MITRE ATT&amp;CK — quick reference</div>
+      <div class="phase-sub">The techniques you'll see most in CyberXcel's pentester-generated alerts. Click any row to open it on attack.mitre.org.</div>
+    </div>
+  </div>
+  <div class="callout tip" style="margin-bottom:12px;"><strong>How to use:</strong> When CrowdStrike shows a Technique ID, look it up at attack.mitre.org for full detail, sub-techniques, real examples, and mitigations.</div>
+
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1059/001/" target="_blank">
+    <div class="mitre-id">T1059.001</div>
+    <div class="mitre-name">PowerShell — most common alert you'll see</div>
+    <div class="mitre-tactic">Execution</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1218/" target="_blank">
+    <div class="mitre-id">T1218</div>
+    <div class="mitre-name">System Binary Proxy Exec (Rundll32, mshta) — LOTL</div>
+    <div class="mitre-tactic">Defense Evasion</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1053/" target="_blank">
+    <div class="mitre-id">T1053</div>
+    <div class="mitre-name">Scheduled Task — most common persistence method</div>
+    <div class="mitre-tactic">Persistence</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1547/" target="_blank">
+    <div class="mitre-id">T1547</div>
+    <div class="mitre-name">Registry Run Keys / Boot Autostart</div>
+    <div class="mitre-tactic">Persistence</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1027/" target="_blank">
+    <div class="mitre-id">T1027</div>
+    <div class="mitre-name">Obfuscated Files — Base64 encoded commands</div>
+    <div class="mitre-tactic">Defense Evasion</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1003/" target="_blank">
+    <div class="mitre-id">T1003</div>
+    <div class="mitre-name">OS Credential Dumping — password/hash theft</div>
+    <div class="mitre-tactic">Credential Access</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1071/" target="_blank">
+    <div class="mitre-id">T1071</div>
+    <div class="mitre-name">Application Layer Protocol — disguised C2 traffic</div>
+    <div class="mitre-tactic">C2</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1566/" target="_blank">
+    <div class="mitre-id">T1566</div>
+    <div class="mitre-name">Phishing — malicious attachments and links</div>
+    <div class="mitre-tactic">Initial Access</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+  <a class="mitre-row" href="https://attack.mitre.org/techniques/T1486/" target="_blank">
+    <div class="mitre-id">T1486</div>
+    <div class="mitre-name">Data Encrypted for Impact — ransomware</div>
+    <div class="mitre-tactic">Impact</div>
+    <div class="mitre-arrow">↗</div>
+  </a>
+
+  <div class="callout tip" style="margin-top:12px;"><strong>CyberXcel pentester tip:</strong> Red teamers typically use T1059, T1218, and T1053 most often. Watch for PowerShell from unexpected parent processes and new scheduled tasks created at unusual times.</div>
+</div>
+
+<div class="nav-btns">
+  <button class="nav-btn" id="btn-prev" onclick="navPhase(-1)" disabled>&#8592; Previous</button>
+  <button class="nav-btn primary" id="btn-next" onclick="navPhase(1)">Next step &#8594;</button>
+</div>
+
+<div class="done-banner" id="done-banner">
+  Shift workflow complete. All steps reviewed.
+  <br>
+  <button class="reset-btn" onclick="resetAll()">Reset for next shift</button>
+</div>
+
+<footer>CrowdStrike SOC Daily Workflow &mdash; Built for CyberXcel training &mdash; Open this file in any browser</footer>
+
+</div>
+
+<script>
+let currentPhase = 0;
+const totalPhases = 7;
+const triageState = {};
+
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getUTCHours()).padStart(2,'0');
+  const m = String(now.getUTCMinutes()).padStart(2,'0');
+  const s = String(now.getUTCSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = h+':'+m+':'+s+' UTC';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function setPhase(idx) {
+  document.querySelectorAll('.phase-content').forEach((el,i) => el.classList.toggle('active', i===idx));
+  document.querySelectorAll('.phase-tab').forEach((el,i) => el.classList.toggle('active', i===idx));
+  currentPhase = idx;
+  document.getElementById('btn-prev').disabled = idx === 0;
+  const nextBtn = document.getElementById('btn-next');
+  nextBtn.style.display = idx === totalPhases - 1 ? 'none' : 'inline-block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function navPhase(dir) {
+  const next = currentPhase + dir;
+  if (next >= 0 && next < totalPhases) setPhase(next);
+}
+
+function toggleStep(el) {
+  el.classList.toggle('done');
+  updateProgress();
+}
+
+function updateProgress() {
+  const all = document.querySelectorAll('.step-item');
+  const done = document.querySelectorAll('.step-item.done');
+  const pct = all.length ? Math.round((done.length / all.length) * 100) : 0;
+  document.getElementById('prog').style.width = pct + '%';
+  document.getElementById('prog-pct').textContent = pct + '%';
+  document.getElementById('done-banner').style.display = pct === 100 ? 'block' : 'none';
+}
+
+function triageSelect(el, group, val) {
+  el.closest('.tq-options').querySelectorAll('.tq-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  triageState[group] = val;
+  updateVerdict();
+}
+
+function updateVerdict() {
+  const { device, blocked, parent, vt } = triageState;
+  const v = document.getElementById('verdict');
+  if (!device || !blocked || !parent || !vt) {
+    v.innerHTML = 'Answer all four questions to get a recommendation.';
+    v.className = 'verdict-panel callout';
+    return;
+  }
+  const isServer = device === 'server';
+  const notBlocked = blocked === 'no';
+  const suspParent = parent === 'yes';
+  const isMalicious = vt === 'malicious';
+  const score = (notBlocked?1:0) + (suspParent?1:0) + (isMalicious?1:0);
+  let verdict, cls;
+
+  if (score >= 2 || (isMalicious && notBlocked)) {
+    verdict = '<strong>Likely TRUE POSITIVE.</strong> Strong indicators of malicious activity. ' +
+      (isServer ? 'This is a SERVER — notify your team lead before containing. Assess business impact first.' :
+                  'Contain the host now. Connect via RTR. Capture memory dump before doing anything else.') +
+      ' Document everything with UTC timestamps.';
+    cls = 'danger';
+  } else if (score === 1) {
+    verdict = '<strong>Investigate further before deciding.</strong> Some indicators present but not conclusive. ' +
+      'Check Advanced Event Search for related activity. Look at 7-day alert history for this user. ' +
+      (vt === 'not-checked' ? 'Run VirusTotal checks first — that may change your assessment.' : '') +
+      ' If still unsure, escalate to senior analyst.';
+    cls = 'warn';
+  } else {
+    verdict = '<strong>Likely FALSE POSITIVE.</strong> Action was blocked, parent looks normal, VirusTotal is clean. ' +
+      'Check if this is legitimate software being flagged (dev tool, admin script). ' +
+      'If confirmed, close the ticket, tag it False Positive, add a note. Consider creating an exclusion rule if it will recur.';
+    cls = 'tip';
+  }
+  v.innerHTML = verdict;
+  v.className = 'verdict-panel callout ' + cls;
+}
+
+function resetAll() {
+  document.querySelectorAll('.step-item').forEach(el => el.classList.remove('done'));
+  document.querySelectorAll('.tq-btn').forEach(el => el.classList.remove('selected'));
+  Object.keys(triageState).forEach(k => delete triageState[k]);
+  document.getElementById('verdict').innerHTML = 'Select options above to get a triage recommendation.';
+  document.getElementById('verdict').className = 'verdict-panel callout';
+  document.getElementById('done-banner').style.display = 'none';
+  setPhase(0);
+  updateProgress();
+}
+</script>
+</body>
+</html>
