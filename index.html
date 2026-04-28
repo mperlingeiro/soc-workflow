@@ -445,11 +445,15 @@ footer {
     </div>
     <div class="step-item" onclick="toggleStep(this)">
       <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Analyse the command line</div><div class="step-detail">Break down every argument in the command. Ask: what is this trying to do? Is this normal behaviour for this process? Could a legitimate user have typed this? Example: reg add + UserInitMprLogonScript + backdoor.exe = persistence attempt. Understanding the command tells you the attacker's intent.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
       <div><div class="step-label">Check for Threat Actor indicator</div><div class="step-detail">Small icon on alert = CrowdStrike has linked this to a known threat actor group (e.g. BEAR, SPIDER, PANDA naming). Note the group name.</div></div>
     </div>
     <div class="step-item" onclick="toggleStep(this)">
       <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
-      <div><div class="step-label">Check Network Connections tab</div><div class="step-detail">Any active outbound connections to external IPs? If yes — the process may be calling back to a C2 server. Note the IP. This is urgent.</div></div>
+      <div><div class="step-label">Check Network Connections tab</div><div class="step-detail">Any active outbound connections to external IPs? If yes — the process may be calling back to a C2 server. Note the IP. This is urgent. SKIP this step if the alert involves registry-only tools like reg.exe — they do not make network connections. Network connections matter most for alerts involving PowerShell, unknown executables, or C2 activity.</div></div>
     </div>
   </div>
   <div class="callout tip"><strong>Rule:</strong> Read first, act second. Many junior analysts start isolating or blocking before they understand what they're looking at. Read the full alert first — it takes 3 minutes and saves you from mistakes.</div>
