@@ -403,6 +403,10 @@ footer {
     </div>
     <div class="step-item" onclick="toggleStep(this)">
       <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
+      <div><div class="step-label">Read the alert symbols — not just severity</div><div class="step-detail">Three symbols appear next to each alert and affect priority: Green circle with checkmark = fully blocked and resolved, lowest urgency. Orange circle with green dot = detected and process killed, may have partially executed before being stopped. Orange circle with no dot = alert only, nothing was blocked — the action may have completed. ALWAYS prioritise an orange circle with no dot over everything else, even if its severity is lower than other alerts.</div></div>
+    </div>
+    <div class="step-item" onclick="toggleStep(this)">
+      <div class="step-check"><svg class="step-check-mark" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1"/></svg></div>
       <div><div class="step-label">Scan the list before opening anything</div><div class="step-detail">Same hostname appearing multiple times? Same technique? This is a pattern — could be an active breach in progress.</div></div>
     </div>
     <div class="step-item" onclick="toggleStep(this)">
@@ -410,7 +414,7 @@ footer {
       <div><div class="step-label">Assign first alert to yourself</div><div class="step-detail">Click Assign → select your username. Change status to "In Progress". Prevents two analysts working the same case.</div></div>
     </div>
   </div>
-  <div class="callout warn"><strong>Common mistake:</strong> Opening alerts in the order they appear (newest first). This means you may spend 20 minutes on a Low severity while a Critical sits untouched. Always sort by severity.</div>
+  <div class="callout warn"><strong>Common mistake:</strong> Prioritising only by severity and ignoring the alert symbol. An orange circle with no dot on a Medium severity is more urgent than a green checkmark on a High. Always check both.</div>
 </div>
 
 <!-- PHASE 2 -->
